@@ -21,7 +21,7 @@ export class DirigeraHub {
         }
         logger.debug(`authenticating host [${config.host}], name [${config.name}]`);
         const accessToken = config.token ?? await DirigeraHub.authenticate(config.host, config.name, logger);
-        logger.debug(`access token [${accessToken}]`);
+        logger.debug('access token resolved');
         const client = await createDirigeraClient({
             gatewayIP: config.host,
             accessToken
@@ -41,7 +41,7 @@ export class DirigeraHub {
         const codeVerifier = generateCodeVerifier();
         const codeChallenge = calculateCodeChallenge(codeVerifier);
 
-        const { got } = await import('got');
+        const got = (await import('got')).default;
         const { code } = await got.get(`https://${ip}:8443/v1/oauth/authorize`, {
             https: {
                 rejectUnauthorized: false
@@ -72,16 +72,11 @@ export class DirigeraHub {
                     }
                 }).json<{ access_token: string }>()).access_token;
 
-                logger.info(`
-                Authentication token resolved. To avoid re-authenticating on each homebridge restart, add it to the hub configuration, e.g.:
-                {
-                    "host": "${ip}",
-                    "token": "${accessToken}",
-                    ${name ? `"name": ${name}` : '...'}
-                }`);
+                logger.info(`Authentication token resolved for Dirigera Hub [${hubDesc}]. Use the Homebridge custom UI to save the token to the plugin config.`);
 
             } catch (error) {
-                if ((<any>error).response.statusCode === 403) {
+                const statusCode = (<any>error).response?.statusCode;
+                if (statusCode === 403) {
                     if (attempt % 3 === 0) {
                         logger.info(`\nStill waiting for that Action Button [${hubDesc}]...\n`);
                     }
@@ -90,7 +85,7 @@ export class DirigeraHub {
                         throw new Error(`Could not authenticate to hub [${hubDesc}]. Action button wasn't pressed.`);
                     }
                 } else {
-                    return DirigeraHub.authenticate(ip, name, logger, attempt++);
+                    return DirigeraHub.authenticate(ip, name, logger, attempt + 1);
                 }
             }
         }
@@ -128,9 +123,19 @@ export class DirigeraHub {
                     this.emitter.emit('pong');
                     break;
                 case 'deviceStateChanged':
-                    if (update.data.attributes) {
+                    if (update.data.attributes || typeof update.data.isReachable === 'boolean') {
                         this.emitter.emit('deviceStateChanged', {
                             id: update.data.id,
+                            isReachable: update.data.isReachable,
+                            attributes: update.data.attributes
+                        });
+                    }
+                    break;
+                case 'deviceConfigurationChanged':
+                    if (update.data && typeof update.data.isReachable === 'boolean') {
+                        this.emitter.emit('deviceStateChanged', {
+                            id: update.data.id,
+                            isReachable: update.data.isReachable,
                             attributes: update.data.attributes
                         });
                     }
@@ -183,7 +188,7 @@ export class DirigeraHub {
     }
 
     async identifyDevice(id: string, period: number = 5): Promise<void> {
-        const { got } = await import('got');
+        const got = (await import('got')).default;
         const resp = await got.put(`https://${this.config.host}:8443/v1/devices/${id}/identify`, {
             headers: {
                 'Authorization': `Bearer ${this.config.token}`,
@@ -240,18 +245,29 @@ export namespace DirigeraHub {
         host: string,
         token?: string,
         name?: string,
+        exposeConfiguredDevicesOnly?: boolean,
         devices?: {
-            [id: string]: {
-                asSwitch?: boolean // only supported by: Light, Outlet
-            }
+            [id: string]: DeviceConfig
         }
+    };
+
+    export type DeviceConfig = {
+        expose?: boolean,
+        asSwitch?: boolean, // only supported by: Light, Outlet
+        asDoor?: boolean, // only supported by: openCloseSensor
+        name?: string,
+        type?: string,
+        roomName?: string,
+        model?: string,
+        manufacturer?: string
     };
 
     export type Info = Awaited<ReturnType<DirigeraClient['hub']['status']>>;
 
     export type DeviceStateChange = {
         id: string,
-        attributes: any
+        isReachable?: boolean,
+        attributes?: any
     }
 }
 

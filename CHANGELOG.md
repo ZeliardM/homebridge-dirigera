@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.0.0](https://github.com/ZeliardM/homebridge-dirigera/compare/v0.3.0...v1.0.0) (2026-05-23)
+
+### Features
+
+* renamed the package to `homebridge-dirigera` and declared Homebridge 2.0 / Node 22-24 compatibility
+* added a custom Homebridge Config UI for pairing DIRIGERA hubs, storing read-only tokens, discovering devices, and selecting exposed contact sensors, bulbs, and outlets
+* added per-device exposure filtering so excluded DIRIGERA devices are not registered with Homebridge
+* added door exposure mode for DIRIGERA contact sensors without publishing a separate sensor or battery service
+* added adaptive lighting registration for bulbs that support brightness and color temperature
+* added DIRIGERA reachability tracking so offline devices report HomeKit communication failures instead of stale state
+
+### Bug Fixes
+
+* fixed DIRIGERA light color temperature clamping and HomeKit mired conversion
+* fixed contact sensor state mapping to use explicit HomeKit contact states
+* fixed outlet and switch state updates to preserve existing cached attributes
+* fixed unavailable lights preserving or re-applying stale on/brightness values after DIRIGERA reports them offline
+* fixed unavailable contact sensors and door-mode sensors accepting stale state updates while unreachable
+
 ## [0.3.0](https://github.com/uboness/homebridge-dirigera/compare/v0.2.6...v0.3.0) (2025-08-12)
 
 

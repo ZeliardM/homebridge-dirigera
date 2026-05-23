@@ -6,6 +6,8 @@ import { Device } from 'dirigera';
 import { ILogger } from '../Logger.js';
 import { CommonDeviceAttributes } from 'dirigera/dist/src/types/device/Device.js';
 
+const COMMUNICATION_FAILURE = -70402;
+
 export abstract class DirigeraDevice<Attrs extends CommonDeviceAttributes = CommonDeviceAttributes> {
 
     readonly platform: DirigeraPlatform;
@@ -24,7 +26,7 @@ export abstract class DirigeraDevice<Attrs extends CommonDeviceAttributes = Comm
         this.device = device;
         this.logger = hub.logger.getLogger(this.type, this.name);
         this.service = service;
-        this._available = true;
+        this._available = device.isReachable !== false;
         this.service.setPrimaryService(true);
         this.service.setCharacteristic(platform.Characteristic.Name, accessory.displayName);
         this.service.addOptionalCharacteristic(platform.Characteristic.StatusActive);
@@ -32,7 +34,14 @@ export abstract class DirigeraDevice<Attrs extends CommonDeviceAttributes = Comm
         if (!status) {
             status = this.service.addCharacteristic(platform.Characteristic.StatusActive);
         }
-        status.setValue(this.available);
+        status.setValue(this.available).onGet(() => this.available);
+
+        this.service.addOptionalCharacteristic(platform.Characteristic.StatusFault);
+        let statusFault = this.service.getCharacteristic(platform.Characteristic.StatusFault);
+        if (!statusFault) {
+            statusFault = this.service.addCharacteristic(platform.Characteristic.StatusFault);
+        }
+        statusFault.setValue(this.statusFault).onGet(() => this.statusFault);
     }
 
     abstract update(attributes: Attrs);
@@ -56,8 +65,46 @@ export abstract class DirigeraDevice<Attrs extends CommonDeviceAttributes = Comm
     }
 
     set available(available: boolean) {
+        if (this._available === available) {
+            if (!available) {
+                this.refreshAvailabilityCharacteristics(available);
+            }
+            return;
+        }
         this._available = available;
+        this.refreshAvailabilityCharacteristics(available);
+    }
+
+    private refreshAvailabilityCharacteristics(available: boolean) {
         this.service.getCharacteristic(this.platform.Characteristic.StatusActive).updateValue(available);
+        this.service.getCharacteristic(this.platform.Characteristic.StatusFault).updateValue(this.statusFault);
+        this.onAvailabilityChanged(available);
+    }
+
+    updateReachability(isReachable: boolean) {
+        this.device.isReachable = isReachable;
+        this.available = isReachable && this.hub.available;
+    }
+
+    protected assertAvailable() {
+        if (!this.available) {
+            throw this.unavailableError;
+        }
+    }
+
+    protected onAvailabilityChanged(_available: boolean) {
+    }
+
+    protected get unavailableError() {
+        const error = new Error(`${this.name || this.id} is unreachable`);
+        (error as any).hapStatus = COMMUNICATION_FAILURE;
+        return error;
+    }
+
+    private get statusFault() {
+        return this.available ?
+            this.platform.Characteristic.StatusFault.NO_FAULT :
+            this.platform.Characteristic.StatusFault.GENERAL_FAULT;
     }
 
 }

@@ -2,32 +2,97 @@
   "pluginAlias": "Dirigera",
   "pluginType": "platform",
   "singular": true,
+  "customUi": true,
+  "customUiPath": "./homebridge-ui",
+  "headerDisplay": "Configure DIRIGERA hubs, pair access tokens, and choose which supported devices are exposed to HomeKit.",
+  "footerDisplay": "",
   "schema": {
     "type": "object",
     "properties": {
+      "name": {
+        "type": "string",
+        "title": "Platform Name",
+        "default": "Dirigera"
+      },
       "hubs": {
         "type": "array",
         "title": "DIRIGERA Hubs",
+        "orderable": false,
         "items": {
           "title": "Hub",
           "type": "object",
+          "required": [
+            "host"
+          ],
           "properties": {
             "host": {
               "title": "Host / IP",
               "type": "string",
-              "required": true,
               "format": "hostname"
             },
             "token": {
               "title": "Authentication Token",
               "type": "string",
-              "required": false
+              "readOnly": true
             },
             "name": {
               "title": "Name",
               "type": "string",
-              "required": false,
               "minLength": 1
+            },
+            "exposeConfiguredDevicesOnly": {
+              "title": "Only Expose Selected Devices",
+              "type": "boolean",
+              "default": false
+            },
+            "devices": {
+              "title": "Device Exposure",
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "expose": {
+                    "title": "Expose to HomeKit",
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "asSwitch": {
+                    "title": "Expose as Switch",
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "asDoor": {
+                    "title": "Expose as Door",
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "name": {
+                    "title": "Device Name",
+                    "type": "string",
+                    "readOnly": true
+                  },
+                  "type": {
+                    "title": "DIRIGERA Type",
+                    "type": "string",
+                    "readOnly": true
+                  },
+                  "roomName": {
+                    "title": "Room",
+                    "type": "string",
+                    "readOnly": true
+                  },
+                  "model": {
+                    "title": "Model",
+                    "type": "string",
+                    "readOnly": true
+                  },
+                  "manufacturer": {
+                    "title": "Manufacturer",
+                    "type": "string",
+                    "readOnly": true
+                  }
+                }
+              }
             }
           }
         }

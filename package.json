@@ -1,11 +1,8 @@
 {
-  "name": "@uboness/homebridge-dirigera",
-  "version": "0.3.0",
-  "author": "uboness",
+  "name": "homebridge-dirigera",
+  "version": "1.0.0",
+  "author": "uboness; maintained by ZeliardM",
   "type": "commonjs",
-  "publishConfig": {
-    "@uboness:registry": "https://registry.npmjs.org "
-  },
   "displayName": "Homebridge DIRIGERA",
   "description": "IKEA DIRIGERA Homebridge Plugin",
   "license": "Apache-2.0",
@@ -14,14 +11,15 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/uboness/homebridge-dirigera"
+    "url": "git+https://github.com/ZeliardM/homebridge-dirigera.git"
   },
   "bugs": {
-    "url": "https://github.com/uboness/homebridge-dirigera/issues"
+    "url": "https://github.com/ZeliardM/homebridge-dirigera/issues"
   },
+  "homepage": "https://github.com/ZeliardM/homebridge-dirigera#readme",
   "engines": {
-    "node": "^20.9.0 || ^22.18.0",
-    "homebridge": "^1.6.0"
+    "node": "^22.12.0 || ^24.0.0",
+    "homebridge": "^1.6.0 || ^2.0.0"
   },
   "exports": {
     ".": {
@@ -30,44 +28,47 @@
     }
   },
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "files": [
     "tsconfig.json",
     "LICENSE",
     "README.md",
     "CHANGELOG.md",
     "dist",
+    "homebridge-ui",
     "config.schema.json"
   ],
   "scripts": {
     "clean": "rimraf ./dist",
-    "build": "pnpm run clean && tsc",
-    "watch": "pnpm run clean && tsc -w",
-    "prepublishOnly": "pnpm run build",
-    "release:bump": "pnpm run build && commit-and-tag-version",
+    "build": "rimraf ./dist && tsc",
+    "watch": "npm run clean && tsc -w",
+    "prepublishOnly": "npm run build",
+    "release:bump": "npm run build && commit-and-tag-version",
     "release:bump-minor": "commit-and-tag-version --release-as minor",
     "release:bump-major": "commit-and-tag-version --release-as major",
-    "release:postbump": "pnpm run release:push && pnpm run release:publish",
+    "release:postbump": "npm run release:push && npm run release:publish",
     "release:push": "git push --follow-tags",
     "release:publish": "npm publish --access public",
-    "release": "pnpm run release:bump && pnpm run release:postbump",
-    "release-minor": "pnpm run release:bump-minor && pnpm run release:push && pnpm run release:publish",
-    "release-major": "pnpm run release:bump-major && pnpm run release:push && pnpm run release:publish"
+    "release": "npm run release:bump && npm run release:postbump",
+    "release-minor": "npm run release:bump-minor && npm run release:push && npm run release:publish",
+    "release-major": "npm run release:bump-major && npm run release:push && npm run release:publish"
   },
   "dependencies": {
-    "dirigera": "^1.4.0",
-    "got": "^14.4.7"
+    "@homebridge/plugin-ui-utils": "^2.2.3",
+    "dirigera": "^1.8.0",
+    "got": "^15.0.5"
   },
   "devDependencies": {
-    "@types/node": "^24.2.1",
-    "@typescript-eslint/eslint-plugin": "^8.39.1",
-    "@typescript-eslint/parser": "^8.39.1",
-    "commit-and-tag-version": "^12.5.2",
-    "eslint": "^9.33.0",
-    "homebridge": "^1.11.0",
-    "homebridge-config-ui-x": "^5.4.1",
-    "nodemon": "^3.1.10",
-    "rimraf": "^6.0.1",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.2"
+    "@types/node": "^25.9.1",
+    "commit-and-tag-version": "^12.7.3",
+    "homebridge": "^2.0.2",
+    "rimraf": "^6.1.3",
+    "typescript": "^6.0.3"
+  },
+  "overrides": {
+    "brace-expansion": "^1.1.14",
+    "handlebars": "^4.7.9",
+    "minimatch": "^3.1.4",
+    "node-persist": "^4.0.4"
   }
 }

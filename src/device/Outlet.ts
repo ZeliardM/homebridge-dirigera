@@ -1,5 +1,4 @@
 import { Device } from 'dirigera';
-import { LightAttributes } from 'dirigera/dist/src/types/device/Light.js';
 import { Outlet as _Outlet, OutletAttributes } from 'dirigera/dist/src/types/device/Outlet.js';
 import { PlatformAccessory } from 'homebridge';
 import { isBoolean } from '../common.js';
@@ -10,7 +9,7 @@ import { Switch } from './Switch.js';
 
 export class Outlet extends DirigeraDevice<OutletAttributes> {
 
-    static readonly create = async (platform: DirigeraPlatform, hub: DirigeraHub, accessory: PlatformAccessory, device: Device): Promise<Outlet> => {
+    static readonly create = async (platform: DirigeraPlatform, hub: DirigeraHub, accessory: PlatformAccessory, device: Device): Promise<DirigeraDevice> => {
         const asSwitch = hub.config.devices?.[device.id]?.asSwitch ?? false;
         if (asSwitch) {
             return Switch.create(platform, hub, accessory, device);
@@ -22,27 +21,56 @@ export class Outlet extends DirigeraDevice<OutletAttributes> {
         super(platform, hub, accessory, device, accessory.getService(platform.Service.Outlet) ?? accessory.addService(platform.Service.Outlet));
 
         this.service.getCharacteristic(platform.Characteristic.On)
-            .setValue(this.device.attributes.isOn as boolean)
+            .setValue(this.homeKitOn)
+            .onGet(() => {
+                this.assertAvailable();
+                return this.homeKitOn;
+            })
             .onSet(async (value, context) => {
+                this.assertAvailable();
                 const isOn = !!value;
                 this.device.attributes.isOn = isOn;
                 if (!context?.fromDirigera) {
-                    await hub.setDeviceAttributes(device.id, { isOn } as LightAttributes);
+                    await hub.setDeviceAttributes(device.id, { isOn } as OutletAttributes);
                 }
             });
+
+        if (!this.available) {
+            this.onAvailabilityChanged(false);
+        }
 
     }
 
     update(attributes: OutletAttributes) {
-        this.device.attributes = attributes;
+        this.device.attributes = {
+            ...this.device.attributes,
+            ...attributes
+        };
+        if (!this.available) {
+            this.onAvailabilityChanged(false);
+            return;
+        }
         if (isBoolean(attributes.isOn)) {
             this.accessory.getService(this.platform.Service.Outlet)!
                 .getCharacteristic(this.platform.Characteristic.On)
-                .setValue(attributes.isOn, { fromDirigera: true });
+                .updateValue(attributes.isOn, { fromDirigera: true });
         }
     }
 
     async close() {
+    }
+
+    protected onAvailabilityChanged(available: boolean) {
+        this.service.getCharacteristic(this.platform.Characteristic.On)
+            .updateValue(available ? this.homeKitOn : false);
+        if (!available) {
+            this.service.getCharacteristic(this.platform.Characteristic.On)
+                .updateValue(this.unavailableError);
+        }
+    }
+
+    private get homeKitOn() {
+        return this.available && isBoolean(this.device.attributes.isOn) ? this.device.attributes.isOn : false;
     }
 
 }

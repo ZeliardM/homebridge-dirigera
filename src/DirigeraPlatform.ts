@@ -10,7 +10,7 @@ import {
 import { PLATFORM_NAME, PLUGIN_NAME, PLUGIN_VERSION } from './settings';
 import { DirigeraHub } from './DirigeraHub.js';
 import { Devices } from './device/index.js';
-import { asyncForEach, cleanArrayAsync, cleanMapAsync, isString, isUndefined, spliceFirstMatch } from './common.js';
+import { asyncForEach, cleanArrayAsync, cleanMapAsync, isBoolean, isString, isUndefined, spliceFirstMatch } from './common.js';
 import { DirigeraDevice } from './device/DirigeraDevice.js';
 import { CommonDeviceAttributes } from 'dirigera/dist/src/types/device/Device.js';
 import { Device } from 'dirigera';
@@ -28,7 +28,7 @@ export class DirigeraPlatform implements DynamicPlatformPlugin {
     private readonly accessories: PlatformAccessory[] = [];
     private readonly log: Logger;
     private readonly config: PlatformConfig;
-    private readonly api: API;
+    public readonly api: API;
 
     private readonly hubs: { [id: string]: DirigeraHub } = {};
 
@@ -104,6 +104,9 @@ export class DirigeraPlatform implements DynamicPlatformPlugin {
                 if (!device) {
                     this.accessories.splice(i--, 1);
                     removeAccessories.push({ accessory, reason: 'Device no longer available' });
+                } else if (!this.shouldExposeDevice(hub, device)) {
+                    this.accessories.splice(i--, 1);
+                    removeAccessories.push({ accessory, reason: 'Device excluded by configuration' });
                 } else if (!accessory.context.pluginVersion) {
                     // from 0.2.0 the accessory UUID has changed to be based on the device id.
                     // from 0.2.2 the plugin version is stored in the accessory context.
@@ -137,17 +140,23 @@ export class DirigeraPlatform implements DynamicPlatformPlugin {
             }
 
             hub.on('availability', async availability => {
-                this.devices[hubId].forEach(device => device.available = availability.available);
-                if (availability.available) {
-                    return this.refreshDevices(hub);
+                if (!availability.available) {
+                    this.devices[hubId].forEach(device => device.available = false);
+                    return;
                 }
+                return this.refreshDevices(hub);
             });
 
             hub.on('deviceStateChanged', change => {
                 const device = this.devices[hubId].find(device => device.id === change.id);
                 if (device) {
                     this.log.debug(`hub [${hub.name}] device [${device.device.attributes.customName}] state changed [${JSON.stringify(change)}]`);
-                    device.update(change.attributes);
+                    if (isBoolean(change.isReachable)) {
+                        device.updateReachability(change.isReachable);
+                    }
+                    if (change.attributes) {
+                        device.update(change.attributes);
+                    }
                 }
             });
 
@@ -176,16 +185,17 @@ export class DirigeraPlatform implements DynamicPlatformPlugin {
         const knownDevices = this.devices[hub.id];
         await asyncForEach(knownDevices, async knownDevice => {
             const freshDevice = freshDevices.find(freshDevice => freshDevice.id === knownDevice.id);
-            if (freshDevice) {
+            if (freshDevice && this.shouldExposeDevice(hub, freshDevice)) {
                 // the known device still exists in the hub... we'll just update its attributes
+                knownDevice.updateReachability(freshDevice.isReachable !== false);
                 await knownDevice.update(freshDevice.attributes);
             } else {
-                // the know device no longer exists in the hub, we'll need to remove/unregister it
+                // the known device no longer exists in the hub or was excluded, we'll need to remove/unregister it
                 await this.unregisterDevice(hub, knownDevice);
             }
         });
         await asyncForEach(freshDevices, async device => {
-            if (!knownDevices.find(knownDevice => knownDevice.id === device.id)) {
+            if (this.shouldExposeDevice(hub, device) && !knownDevices.find(knownDevice => knownDevice.id === device.id)) {
                 await this.registerDevice(hub, device);
             }
         });
@@ -193,7 +203,12 @@ export class DirigeraPlatform implements DynamicPlatformPlugin {
 
     private async registerDevice(hub: DirigeraHub, device: Device) {
         if (isUndefined(Devices[device.deviceType])) {
-            return
+            return;
+        }
+
+        if (!this.shouldExposeDevice(hub, device)) {
+            this.log.debug(`[${hub.name}] skipping [${device.deviceType}][${device.id}] device [${device.attributes.customName || device.id}] - excluded by configuration`);
+            return;
         }
 
         // generate a unique id for the accessory this should be generated from
@@ -250,6 +265,17 @@ export class DirigeraPlatform implements DynamicPlatformPlugin {
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [ registeredDevice.accessory ]);
         spliceFirstMatch(this.accessories, accessory => accessory.UUID === registeredDevice.accessory.UUID);
         await registeredDevice.close()
+    }
+
+    private shouldExposeDevice(hub: DirigeraHub, device: Device) {
+        const deviceConfig = hub.config.devices?.[device.id];
+        if (deviceConfig?.expose === false) {
+            return false;
+        }
+        if (hub.config.exposeConfiguredDevicesOnly) {
+            return deviceConfig?.expose === true;
+        }
+        return true;
     }
 
 

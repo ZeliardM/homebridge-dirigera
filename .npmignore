@@ -1,0 +1,14 @@
+node_modules/
+logs/
+*.log
+npm-debug.log*
+pids/
+*.pid
+*.seed
+*.pid.lock
+.homebridge/
+hubs.md
+.DS_Store
+.idea/
+script/
+*.tgz

@@ -9,7 +9,7 @@ import { Switch } from './Switch.js';
 
 export class Light extends DirigeraDevice<LightAttributes> {
 
-    static readonly create = async (platform: DirigeraPlatform, hub: DirigeraHub, accessory: PlatformAccessory, device: Device): Promise<Light> => {
+    static readonly create = async (platform: DirigeraPlatform, hub: DirigeraHub, accessory: PlatformAccessory, device: Device): Promise<DirigeraDevice> => {
         const asSwitch = hub.config.devices?.[device.id]?.asSwitch ?? false;
         if (asSwitch) {
             return Switch.create(platform, hub, accessory, device);
@@ -17,12 +17,28 @@ export class Light extends DirigeraDevice<LightAttributes> {
         return new Light(platform, hub, accessory, device);
     }
 
+    private adaptiveLightingController?: { disableAdaptiveLighting: () => void };
+    private pendingColor?: Pick<LightAttributes, 'colorHue' | 'colorSaturation'>;
+    private pendingColorTimer?: ReturnType<typeof setTimeout>;
+    private readonly colorTemperatureMin?: number;
+    private readonly colorTemperatureMax?: number;
+
     private constructor(platform: DirigeraPlatform, hub: DirigeraHub, accessory: PlatformAccessory, device: Device) {
         super(platform, hub, accessory, device, accessory.getService(platform.Service.Lightbulb) ?? accessory.addService(platform.Service.Lightbulb));
 
+        const initialLightLevel = device.attributes.lightLevel;
+        const initialColorTemperature = device.attributes.colorTemperature;
+        const supportsBrightness = isNumber(initialLightLevel);
+        const supportsColorTemperature = isNumber(initialColorTemperature);
+
         this.service.getCharacteristic(platform.Characteristic.On)
-            .setValue(this.device.attributes.isOn as boolean)
+            .setValue(this.homeKitOn)
+            .onGet(() => {
+                this.assertAvailable();
+                return this.homeKitOn;
+            })
             .onSet(async (value, context) => {
+                this.assertAvailable();
                 const isOn = !!value;
                 this.device.attributes.isOn = isOn;
                 if (!context?.fromDirigera) {
@@ -30,80 +46,107 @@ export class Light extends DirigeraDevice<LightAttributes> {
                 }
             });
 
-        if (isNumber(device.attributes.lightLevel)) {
+        if (supportsBrightness) {
             this.service.getCharacteristic(platform.Characteristic.Brightness)
-                .setValue(device.attributes.lightLevel)
+                .setValue(this.homeKitBrightness)
+                .onGet(() => {
+                    this.assertAvailable();
+                    return this.homeKitBrightness;
+                })
                 .onSet(async (value, context) => {
-                    const lightLevel = value as number;
-                    this.device.attributes.lightLevel = lightLevel
-                    const { colorTemperature, colorSaturation } = this.device.attributes;
+                    this.assertAvailable();
+                    const lightLevel = clamp(value as number, 0, 100);
+                    this.device.attributes.lightLevel = lightLevel;
                     if (!context?.fromDirigera) {
-                        await hub.setDeviceAttributes(device.id, { lightLevel, colorSaturation, colorTemperature } as LightAttributes);
+                        await hub.setDeviceAttributes(device.id, { lightLevel } as LightAttributes);
                     }
                 });
         }
 
         if (isNumber(device.attributes.colorHue)) {
             this.service.getCharacteristic(platform.Characteristic.Hue)
-                .setValue(device.attributes.colorHue)
+                .setValue(clamp(device.attributes.colorHue, 0, 360))
+                .onGet(() => {
+                    this.assertAvailable();
+                    return clamp(this.device.attributes.colorHue as number, 0, 360);
+                })
                 .onSet(async (value, context) => {
-                    const colorHue = value as number;
+                    this.assertAvailable();
+                    const colorHue = clamp(value as number, 0, 360);
                     this.device.attributes.colorHue = colorHue;
-                    const { colorSaturation } = this.device.attributes;
                     if (!context?.fromDirigera) {
-                        await hub.setDeviceAttributes(device.id, { colorHue, colorSaturation } as LightAttributes);
+                        this.disableAdaptiveLighting();
+                        this.queueColorUpdate({ colorHue });
                     }
                 });
         }
 
         if (isNumber(device.attributes.colorSaturation)) {
             this.service.getCharacteristic(platform.Characteristic.Saturation)
-                .setValue(device.attributes.colorSaturation * 100)
+                .setValue(saturationToHomeKit(device.attributes.colorSaturation))
+                .onGet(() => {
+                    this.assertAvailable();
+                    return saturationToHomeKit(this.device.attributes.colorSaturation as number);
+                })
                 .onSet(async (value, context) => {
-                    const colorSaturation = <number>value / 100;
+                    this.assertAvailable();
+                    const colorSaturation = saturationFromHomeKit(value as number);
                     this.device.attributes.colorSaturation = colorSaturation;
-                    const { colorHue } = this.device.attributes;
                     if (!context?.fromDirigera) {
-                        await hub.setDeviceAttributes(device.id, { colorHue, colorSaturation } as LightAttributes);
+                        this.disableAdaptiveLighting();
+                        this.queueColorUpdate({ colorSaturation });
                     }
                 });
         }
 
-        if (isNumber(device.attributes.colorTemperature)) {
+        if (supportsColorTemperature) {
 
-            let colorTemperature = device.attributes.colorTemperature;
+            const colorTemperatureMin = isNumber(device.attributes.colorTemperatureMin) ? device.attributes.colorTemperatureMin : undefined;
+            const colorTemperatureMax = isNumber(device.attributes.colorTemperatureMax) ? device.attributes.colorTemperatureMax : undefined;
+            this.colorTemperatureMin = isNumber(colorTemperatureMin) && isNumber(colorTemperatureMax) ?
+                Math.min(colorTemperatureMin, colorTemperatureMax) :
+                colorTemperatureMin;
+            this.colorTemperatureMax = isNumber(colorTemperatureMin) && isNumber(colorTemperatureMax) ?
+                Math.max(colorTemperatureMin, colorTemperatureMax) :
+                colorTemperatureMax;
 
-            let min;
-            let max;
+            const colorTemperature = this.clampColorTemperature(initialColorTemperature);
+            const minMired = isNumber(this.colorTemperatureMax) ? kelvinToMired(this.colorTemperatureMax) : undefined;
+            const maxMired = isNumber(this.colorTemperatureMin) ? kelvinToMired(this.colorTemperatureMin) : undefined;
 
-            if (isNumber(device.attributes.colorTemperatureMin) && isNumber(device.attributes.colorTemperatureMax)) {
-                min = Math.max(device.attributes.colorTemperatureMin, device.attributes.colorTemperatureMax);
-                max = Math.min(device.attributes.colorTemperatureMin, device.attributes.colorTemperatureMax);
-                colorTemperature = Math.max(min, colorTemperature);
-                colorTemperature = Math.min(max, colorTemperature);
-            }
-
-            const value = 1_000_000 / colorTemperature;
-
-            this.service.getCharacteristic(platform.Characteristic.ColorTemperature)
-                .setValue(value)
+            const colorTemperatureCharacteristic = this.service.getCharacteristic(platform.Characteristic.ColorTemperature)
+                .setValue(kelvinToMired(colorTemperature))
                 .setProps({
-                    minValue: isNumber(min) ?  1_000_000 / min : undefined,
-                    maxValue: isNumber(max) ? 1_000_000 / max : undefined
+                    minValue: minMired,
+                    maxValue: maxMired
+                })
+                .onGet(() => {
+                    this.assertAvailable();
+                    return kelvinToMired(this.clampColorTemperature(this.device.attributes.colorTemperature as number));
                 })
                 .onSet(async (value, context) => {
-                    let colorTemperature = Math.round(1_000_000 / <number>value);
-                    if (isNumber(device.attributes.colorTemperatureMin)) {
-                        colorTemperature = Math.min(device.attributes.colorTemperatureMin, colorTemperature);
-                    }
-                    if (isNumber(device.attributes.colorTemperatureMax)) {
-                        colorTemperature = Math.max(device.attributes.colorTemperatureMax, colorTemperature);
-                    }
+                    this.assertAvailable();
+                    const colorTemperature = this.clampColorTemperature(miredToKelvin(value as number));
                     device.attributes.colorTemperature = colorTemperature;
+                    this.updateHueSaturationFromColorTemperature(value as number);
                     if (!context?.fromDirigera) {
-                        await hub.setDeviceAttributes(device.id, { colorTemperature } as LightAttributes)
+                        await hub.setDeviceAttributes(device.id, { colorTemperature } as LightAttributes);
                     }
                 });
+
+            this.updateHueSaturationFromColorTemperature(colorTemperatureCharacteristic.value as number);
+        }
+
+        if (supportsBrightness && supportsColorTemperature) {
+            const AdaptiveLightingController = (platform.api.hap as any).AdaptiveLightingController;
+            if (AdaptiveLightingController) {
+                this.adaptiveLightingController = new AdaptiveLightingController(this.service);
+                accessory.configureController(this.adaptiveLightingController as any);
+            }
+        }
+
+        if (!this.available) {
+            this.onAvailabilityChanged(false);
         }
 
     }
@@ -113,6 +156,10 @@ export class Light extends DirigeraDevice<LightAttributes> {
             ...this.device.attributes,
             ...attributes
         };
+        if (!this.available) {
+            this.onAvailabilityChanged(false);
+            return;
+        }
         if (isBoolean(attributes.isOn)) {
             this.accessory.getService(this.platform.Service.Lightbulb)!
                 .getCharacteristic(this.platform.Characteristic.On)
@@ -120,23 +167,147 @@ export class Light extends DirigeraDevice<LightAttributes> {
         }
         if (isNumber(attributes.lightLevel)) {
             this.service.getCharacteristic(this.platform.Characteristic.Brightness)
-                .updateValue(attributes.lightLevel, { fromDirigera: true });
+                .updateValue(clamp(attributes.lightLevel, 0, 100), { fromDirigera: true });
         }
         if (isNumber(attributes.colorHue)) {
             this.service.getCharacteristic(this.platform.Characteristic.Hue)
-                .updateValue(attributes.colorHue, { fromDirigera: true });
+                .updateValue(clamp(attributes.colorHue, 0, 360), { fromDirigera: true });
         }
         if (isNumber(attributes.colorSaturation)) {
             this.service.getCharacteristic(this.platform.Characteristic.Saturation)
-                .updateValue(attributes.colorSaturation * 100, { fromDirigera: true });
+                .updateValue(saturationToHomeKit(attributes.colorSaturation), { fromDirigera: true });
         }
         if (isNumber(attributes.colorTemperature)) {
+            const mired = kelvinToMired(this.clampColorTemperature(attributes.colorTemperature));
             this.service.getCharacteristic(this.platform.Characteristic.ColorTemperature)
-                .setValue(1_000_000 / attributes.colorTemperature, { fromDirigera: true });
+                .updateValue(mired, { fromDirigera: true });
+            this.updateHueSaturationFromColorTemperature(mired);
         }
     }
 
     async close(){
+        if (this.pendingColorTimer) {
+            clearTimeout(this.pendingColorTimer);
+        }
     }
 
+    protected onAvailabilityChanged(available: boolean) {
+        const C = this.platform.Characteristic;
+        const error = this.unavailableError;
+
+        this.service.getCharacteristic(C.On)
+            .updateValue(available ? this.homeKitOn : false);
+        if (!available) {
+            this.service.getCharacteristic(C.On).updateValue(error);
+        }
+
+        if (this.service.testCharacteristic(C.Brightness) && isNumber(this.device.attributes.lightLevel)) {
+            this.service.getCharacteristic(C.Brightness)
+                .updateValue(available ? this.homeKitBrightness : 0);
+            if (!available) {
+                this.service.getCharacteristic(C.Brightness).updateValue(error);
+            }
+        }
+        if (this.service.testCharacteristic(C.Hue) && isNumber(this.device.attributes.colorHue)) {
+            this.service.getCharacteristic(C.Hue)
+                .updateValue(clamp(this.device.attributes.colorHue, 0, 360));
+        }
+        if (this.service.testCharacteristic(C.Saturation) && isNumber(this.device.attributes.colorSaturation)) {
+            this.service.getCharacteristic(C.Saturation)
+                .updateValue(saturationToHomeKit(this.device.attributes.colorSaturation));
+        }
+        if (this.service.testCharacteristic(C.ColorTemperature) && isNumber(this.device.attributes.colorTemperature)) {
+            this.service.getCharacteristic(C.ColorTemperature)
+                .updateValue(kelvinToMired(this.clampColorTemperature(this.device.attributes.colorTemperature)));
+        }
+    }
+
+    private queueColorUpdate(attributes: Pick<LightAttributes, 'colorHue'> | Pick<LightAttributes, 'colorSaturation'>) {
+        this.pendingColor = {
+            colorHue: isNumber(this.device.attributes.colorHue) ? this.device.attributes.colorHue : 0,
+            colorSaturation: isNumber(this.device.attributes.colorSaturation) ? this.device.attributes.colorSaturation : 0,
+            ...this.pendingColor,
+            ...attributes
+        };
+
+        if (this.pendingColorTimer) {
+            clearTimeout(this.pendingColorTimer);
+        }
+
+        this.pendingColorTimer = setTimeout(() => {
+            const pendingColor = this.pendingColor;
+            this.pendingColor = undefined;
+            this.pendingColorTimer = undefined;
+            if (pendingColor) {
+                this.hub.setDeviceAttributes(this.id, pendingColor as LightAttributes)
+                    .catch(error => this.logger.error(`Failed to update color. ${error}`));
+            }
+        }, 200);
+    }
+
+    private clampColorTemperature(colorTemperature: number) {
+        let result = colorTemperature;
+        if (isNumber(this.colorTemperatureMin)) {
+            result = Math.max(this.colorTemperatureMin, result);
+        }
+        if (isNumber(this.colorTemperatureMax)) {
+            result = Math.min(this.colorTemperatureMax, result);
+        }
+        return result;
+    }
+
+    private updateHueSaturationFromColorTemperature(mired: number) {
+        const colorUtils = (this.platform.api.hap as any).ColorUtils;
+        const converter = colorUtils?.colorTemperatureToHueAndSaturation;
+        if (!converter) {
+            return;
+        }
+
+        const color = converter(mired);
+        const hue = color.h ?? color.hue;
+        const saturation = color.s ?? color.saturation;
+        if (isNumber(hue)) {
+            this.service.getCharacteristic(this.platform.Characteristic.Hue)
+                .updateValue(hue, { fromDirigera: true });
+        }
+        if (isNumber(saturation)) {
+            this.service.getCharacteristic(this.platform.Characteristic.Saturation)
+                .updateValue(saturation, { fromDirigera: true });
+        }
+    }
+
+    private disableAdaptiveLighting() {
+        this.adaptiveLightingController?.disableAdaptiveLighting();
+    }
+
+    private get homeKitOn() {
+        return this.available && isBoolean(this.device.attributes.isOn) ? this.device.attributes.isOn : false;
+    }
+
+    private get homeKitBrightness() {
+        return this.available && isNumber(this.device.attributes.lightLevel) ?
+            clamp(this.device.attributes.lightLevel, 0, 100) :
+            0;
+    }
+
+}
+
+function clamp(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function kelvinToMired(kelvin: number) {
+    return Math.round(1_000_000 / kelvin);
+}
+
+function miredToKelvin(mired: number) {
+    return Math.round(1_000_000 / mired);
+}
+
+function saturationToHomeKit(saturation: number) {
+    return clamp(saturation * 100, 0, 100);
+}
+
+function saturationFromHomeKit(saturation: number) {
+    return clamp(saturation, 0, 100) / 100;
 }
