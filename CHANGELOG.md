@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file. See [commit
 * fixed outlet and switch state updates to preserve existing cached attributes
 * fixed unavailable lights preserving or re-applying stale on/brightness values after DIRIGERA reports them offline
 * fixed unavailable contact sensors and door-mode sensors accepting stale state updates while unreachable
+* fixed noisy Homebridge read-handler warnings when HomeKit polls unreachable devices
 
 ## [0.3.0](https://github.com/uboness/homebridge-dirigera/compare/v0.2.6...v0.3.0) (2025-08-12)
 

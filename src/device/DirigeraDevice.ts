@@ -88,7 +88,7 @@ export abstract class DirigeraDevice<Attrs extends CommonDeviceAttributes = Comm
 
     protected assertAvailable() {
         if (!this.available) {
-            throw this.unavailableError;
+            throw COMMUNICATION_FAILURE;
         }
     }
 
