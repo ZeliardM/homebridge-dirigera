@@ -9,7 +9,8 @@ All notable changes to this project will be documented in this file. See [commit
 * renamed the package to `homebridge-dirigera` and declared Homebridge 2.0 / Node 22-24 compatibility
 * added a custom Homebridge Config UI for pairing DIRIGERA hubs, storing read-only tokens, discovering devices, and selecting exposed contact sensors, bulbs, and outlets
 * added per-device exposure filtering so excluded DIRIGERA devices are not registered with Homebridge
-* added door exposure mode for DIRIGERA contact sensors without publishing a separate sensor or battery service
+* added door exposure mode for DIRIGERA contact sensors without publishing a separate contact sensor service
+* added battery service support for DIRIGERA contact sensors exposed as HomeKit doors
 * added adaptive lighting registration for bulbs that support brightness and color temperature
 * added DIRIGERA reachability tracking so offline devices report HomeKit communication failures instead of stale state
 

@@ -25,7 +25,6 @@ export class ContactSensor extends DirigeraDevice<OpenCloseSensorAttributes> {
 
         if (asDoor) {
             removeService(accessory, accessory.getService(platform.Service.ContactSensor));
-            removeService(accessory, accessory.getService(platform.Service.Battery));
         } else {
             removeService(accessory, accessory.getService(platform.Service.Door));
         }
@@ -65,11 +64,7 @@ export class ContactSensor extends DirigeraDevice<OpenCloseSensorAttributes> {
                 });
         }
 
-        if (!asDoor && isNumber(device.attributes.batteryPercentage)) {
-            this.battery = accessory.getService(platform.Service.Battery) ?? accessory.addService(platform.Service.Battery);
-            this.battery.getCharacteristic(platform.Characteristic.BatteryLevel)
-                .setValue(device.attributes.batteryPercentage)
-        }
+        this.syncBatteryLevel(device.attributes.batteryPercentage);
 
         if (!this.available) {
             this.onAvailabilityChanged(false);
@@ -81,6 +76,7 @@ export class ContactSensor extends DirigeraDevice<OpenCloseSensorAttributes> {
             ...this.device.attributes,
             ...attributes
         };
+        this.syncBatteryLevel(attributes.batteryPercentage);
         if (!this.available) {
             this.onAvailabilityChanged(false);
             return;
@@ -93,11 +89,6 @@ export class ContactSensor extends DirigeraDevice<OpenCloseSensorAttributes> {
                     .getCharacteristic(this.platform.Characteristic.ContactSensorState)
                     .updateValue(this.contactSensorState);
             }
-        }
-        if (isNumber(attributes.batteryPercentage) && this.battery) {
-            this.device.attributes.batteryPercentage = attributes.batteryPercentage;
-            this.battery.getCharacteristic(this.platform.Characteristic.BatteryLevel)
-                .setValue(attributes.batteryPercentage)
         }
     }
 
@@ -130,6 +121,21 @@ export class ContactSensor extends DirigeraDevice<OpenCloseSensorAttributes> {
     private getDoorPosition() {
         this.assertAvailable();
         return this.doorPosition;
+    }
+
+    private syncBatteryLevel(batteryPercentage: unknown) {
+        if (!isNumber(batteryPercentage)) {
+            return;
+        }
+
+        this.device.attributes.batteryPercentage = batteryPercentage;
+        const existingBattery = this.battery;
+        this.battery = this.accessory.getService(this.platform.Service.Battery) ?? this.accessory.addService(this.platform.Service.Battery);
+        const batteryLevel = this.battery.getCharacteristic(this.platform.Characteristic.BatteryLevel);
+        batteryLevel.updateValue(batteryPercentage);
+        if (!existingBattery) {
+            batteryLevel.onGet(() => this.device.attributes.batteryPercentage as number);
+        }
     }
 
     private syncDoorCharacteristics() {

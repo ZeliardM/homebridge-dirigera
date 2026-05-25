@@ -19,7 +19,7 @@ This plugin includes a Homebridge Config UI setup page that can:
 - Select the contact sensors, light bulbs, and outlets that should be exposed to Homebridge/HomeKit.
 - Exclude devices that are already managed by other plugins.
 - Expose selected lights or outlets as switches when DIRIGERA reports a third-party device in a less useful shape.
-- Expose selected contact sensors as HomeKit doors, where the door position follows the sensor state and no separate contact sensor or battery service is exposed.
+- Expose selected contact sensors as HomeKit doors, where the door position follows the sensor state and the same accessory still exposes the contact sensor battery level.
 
 New devices discovered by the UI are excluded by default until selected.
 
@@ -27,7 +27,7 @@ New devices discovered by the UI are excluded by default until selected.
 
 The custom UI focuses on:
 
-- `openCloseSensor` as HomeKit contact sensors or read-only HomeKit doors
+- `openCloseSensor` as HomeKit contact sensors or read-only HomeKit doors, with battery level exposed when DIRIGERA reports it
 - `light` as HomeKit light bulbs, including on/off, brightness, color temperature, HSV color, and adaptive lighting when the bulb supports brightness and color temperature
 - `outlet` as HomeKit outlets
 
